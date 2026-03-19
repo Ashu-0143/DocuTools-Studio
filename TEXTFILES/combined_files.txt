@@ -1,0 +1,1160 @@
+==============================
+SOURCE FILE: Aadhar.py
+==============================
+
+import os
+import cv2
+import numpy as np
+from pdf2image import convert_from_path
+import shutil
+import re
+from pathlib import Path
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+POPPLER_PATH = r"C:\Users\rao\Documents\work\poppler-25.12.0\Library\bin"
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+VALID_EXTENSIONS = ('.pdf', '.jpg', '.jpeg')
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+def get_next_index(directory):
+    existing_files = os.listdir(directory)
+    max_num = 0
+    for f in existing_files:
+        match = re.match(r"^(\d+)", f)
+        if match:
+            num = int(match.group(1))
+            if num > max_num:
+                max_num = num
+    return max_num + 1
+
+def move_to_temp_safely(source_path, temp_dir):
+    original_filename = Path(source_path).name
+    destination_path = Path(temp_dir) / original_filename
+    counter = 1
+    while destination_path.exists():
+        new_filename = f"{Path(source_path).stem}_{counter}{Path(source_path).suffix}"
+        destination_path = Path(temp_dir) / new_filename
+        counter += 1
+    shutil.move(source_path, destination_path)
+    print(f"  Moved original to temp folder: {destination_path.name}")
+
+def process_aadhar_files():
+    script_name = os.path.basename(__file__)
+    files = [f for f in os.listdir(BASE_DIR) if os.path.isfile(os.path.join(BASE_DIR, f)) 
+             and Path(f).suffix.lower() in VALID_EXTENSIONS 
+             and f != script_name]
+    
+    if not files:
+        print(f"No files found in {BASE_DIR}")
+        return
+
+    card_index = get_next_index(OUTPUT_DIR)
+    
+    for filename in files:
+        input_path = os.path.join(BASE_DIR, filename)
+        file_extension = Path(filename).suffix.lower()
+        file_stem = Path(filename).stem
+        image_to_process_path = input_path
+        temp_jpg_path = None
+        
+        print(f"\nProcessing: {filename}")
+
+        try:
+            if file_extension == '.pdf':
+                if len(file_stem) == 8:
+                    password = file_stem
+                    print(f"  Using filename as password: {password}")
+                else:
+                    password = input("    Enter Password (8 characters): ").strip()
+                
+                pages = []
+                try:
+                    pages = convert_from_path(input_path, dpi=700, poppler_path=POPPLER_PATH, userpw=password)
+                except:
+                    pass
+                
+                if not pages:
+                    print(f"  *Failed to extract pages. Check password.*")
+                    continue
+                
+                temp_jpg_name = f"temp_{file_stem}.jpg"
+                temp_jpg_path = os.path.join(BASE_DIR, temp_jpg_name)
+                pages[0].save(temp_jpg_path, 'JPEG', quality=95)
+                image_to_process_path = temp_jpg_path
+            
+            full_page = cv2.imread(image_to_process_path) 
+            
+            if full_page is None or full_page.size == 0:
+                print(f"  *Failed to load image: {Path(image_to_process_path).name}*")
+                continue
+
+            front_card = full_page[5565:7128, 478:2928] 
+            back_card = full_page[5570:7128, 3031:5476] 
+
+            if front_card.size == 0 or back_card.size == 0:
+                print(f"  *Error: Cropped area empty.*")
+                if temp_jpg_path and os.path.exists(temp_jpg_path):
+                    os.remove(temp_jpg_path)
+                continue
+
+            front_name = f"{card_index}f.jpg"
+            back_name = f"{card_index}b.jpg"
+            
+            cv2.imwrite(os.path.join(OUTPUT_DIR, front_name), front_card, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            cv2.imwrite(os.path.join(OUTPUT_DIR, back_name), back_card, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            print(f"  Saved: {front_name} and {back_name}")
+
+            move_to_temp_safely(input_path, TEMP_DIR)
+            
+            if temp_jpg_path and os.path.exists(temp_jpg_path):
+                os.remove(temp_jpg_path)
+
+            card_index += 1
+
+        except Exception as e:
+            print(f"  *Error: {e}*")
+            if temp_jpg_path and os.path.exists(temp_jpg_path):
+                os.remove(temp_jpg_path)
+
+if __name__ == "__main__":
+    process_aadhar_files()
+    print(f"\nTask complete.")
+
+
+==============================
+SOURCE FILE: citizenship.py
+==============================
+
+import os
+import cv2
+import numpy as np
+from pdf2image import convert_from_path
+import shutil
+import re
+import sys
+import time
+import threading
+import gc
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+POPPLER_PATH = r"C:\Users\rao\Documents\work\poppler-25.12.0\Library\bin"
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+ORIGINAL_DPI = 700
+TARGET_DPI = 500 
+SCALE = TARGET_DPI / ORIGINAL_DPI
+
+F_X, F_Y = int(1692 * SCALE), int(1123 * SCALE)
+F_W, F_H = int(2328 * SCALE), int(1465 * SCALE)
+B_X, B_Y = int(1696 * SCALE), int(3066 * SCALE)
+B_W, B_H = int(2328 * SCALE), int(1465 * SCALE)
+
+class Loader:
+    def __init__(self, desc="Processing..."):
+        self.desc = desc
+        self.done = False
+
+    def animate(self):
+        while not self.done:
+            for c in ['|', '/', '-', '\\']:
+                if self.done: break
+                sys.stdout.write(f'\r{self.desc} {c} ')
+                sys.stdout.flush()
+                time.sleep(0.1)
+
+    def start(self):
+        self.thread = threading.Thread(target=self.animate)
+        self.thread.start()
+
+    def stop(self):
+        self.done = True
+        if hasattr(self, 'thread'):
+            self.thread.join()
+        sys.stdout.write('\r' + ' ' * (len(self.desc) + 10) + '\r')
+
+def get_next_index(directory):
+    existing_files = os.listdir(directory)
+    max_num = 0
+    for f in existing_files:
+        match = re.match(r'^(\d+)', f)
+        if match:
+            num = int(match.group(1))
+            if num > max_num: max_num = num
+    return max_num + 1
+
+def process_sc_files():
+    files = [f for f in os.listdir(BASE_DIR) if f.lower().endswith('.pdf')]
+    if not files:
+        print("[-] No PDF files found in current directory.")
+        return
+
+    card_index = get_next_index(OUTPUT_DIR)
+
+    for filename in files:
+        input_path = os.path.join(BASE_DIR, filename)
+        potential_pw = os.path.splitext(filename)[0] 
+        
+        loader = Loader(f"[*] Processing {filename}")
+        loader.start()
+
+        try:
+            try:
+                pages = convert_from_path(input_path, dpi=TARGET_DPI, 
+                                          poppler_path=POPPLER_PATH, 
+                                          userpw=potential_pw,
+                                          first_page=1, last_page=1)
+            except:
+                loader.stop()
+                print(f"\n[!] Password required for: {filename}")
+                user_pw = input(f" Enter password: ")
+                loader.start()
+                pages = convert_from_path(input_path, dpi=TARGET_DPI, 
+                                          poppler_path=POPPLER_PATH, 
+                                          userpw=user_pw,
+                                          first_page=1, last_page=1)
+            
+            if not pages:
+                raise Exception("Could not load PDF page.")
+
+            pdf_page = pages[0]
+
+            front_crop = pdf_page.crop((F_X, F_Y, F_X + F_W, F_Y + F_H))
+            front_img = cv2.cvtColor(np.array(front_crop), cv2.COLOR_RGB2BGR)
+
+            back_crop = pdf_page.crop((B_X, B_Y, B_X + B_W, B_Y + B_H))
+            back_img = cv2.cvtColor(np.array(back_crop), cv2.COLOR_RGB2BGR)
+
+            cv2.imwrite(os.path.join(OUTPUT_DIR, f"{card_index}f.jpg"), front_img, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
+            cv2.imwrite(os.path.join(OUTPUT_DIR, f"{card_index}b.jpg"), back_img, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
+
+            loader.stop()
+            print(f"[+] Saved Card {card_index}: {filename}")
+            
+            del pages, front_img, back_img, front_crop, back_crop
+            gc.collect()
+
+            shutil.move(input_path, os.path.join(TEMP_DIR, filename))
+            card_index += 1
+
+        except Exception as e:
+            loader.stop()
+            print(f"[x] Error on {filename}: {e}")
+
+if __name__ == "__main__":
+    print("=== SIRISHA STUDIO SENIOR CITIZEN PROCESSOR (AUTO-PATH) ===")
+    process_sc_files()
+    print(f"\n[!] All tasks complete.")
+
+
+==============================
+SOURCE FILE: crop.py
+==============================
+
+import os
+from PIL import Image, ImageOps, ImageChops
+from pdf2image import convert_from_path
+
+# --- Configuration ---
+BASE = r'C:\Users\rao\Desktop\SIRISHA STUDIO\AUTOCROP'
+OUTPUT = os.path.join(BASE, 'Cropped_Results')
+POPPLER = r'C:\Users\rao\Documents\work\poppler-25.12.0\Library\bin'
+
+os.makedirs(OUTPUT, exist_ok=True)
+
+def trim_white_border(img):
+    """
+    Finds the bounding box of non-white content and crops it.
+    Works by inverting the image so white becomes black (0) 
+    and using getbbox to find the content.
+    """
+    img = img.convert('RGB')
+    # Use ImageChops to find difference from a solid white background
+    bg = Image.new('RGB', img.size, (255, 255, 255))
+    diff = ImageChops.difference(img, bg)
+    
+    # Add some tolerance for 'near-white' pixels (useful for scans)
+    diff = ImageChops.add(diff, diff, 2.0, -100)
+    
+    bbox = diff.getbbox()
+    if bbox:
+        return img.crop(bbox)
+    return img
+
+def process_cropping():
+    items = [f for f in os.listdir(BASE) if os.path.isfile(os.path.join(BASE, f))]
+    
+    for file in items:
+        ext = os.path.splitext(file)[1].lower()
+        path = os.path.join(BASE, file)
+        
+        try:
+            if ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                print(f"Cropping Image: {file}")
+                with Image.open(path) as img:
+                    cropped = trim_white_border(img)
+                    cropped.save(os.path.join(OUTPUT, f"cropped_{file}"), quality=95)
+
+            elif ext == '.pdf':
+                print(f"Cropping PDF: {file}")
+                pages = convert_from_path(path, dpi=300, poppler_path=POPPLER)
+                cropped_pages = [trim_white_border(p) for p in pages]
+                
+                if cropped_pages:
+                    cropped_pages[0].save(
+                        os.path.join(OUTPUT, f"cropped_{file}"),
+                        save_all=True,
+                        append_images=cropped_pages[1:],
+                        optimize=True
+                    )
+        except Exception as e:
+            print(f"Skipping {file}: {e}")
+
+if __name__ == "__main__":
+    process_cropping()
+    print(f"\nDone! Cropped files are in: {OUTPUT}")
+
+
+==============================
+SOURCE FILE: Enhance4.py
+==============================
+
+import cv2
+import numpy as np
+import os
+import shutil
+import re
+import gc  # Garbage Collector to fix memory issues
+from pathlib import Path
+from PIL import Image
+import pillow_heif
+import fitz  # PyMuPDF
+
+pillow_heif.register_heif_opener()
+
+class StudioProProcessor:
+    def __init__(self):
+        self.base_path = Path(__file__).parent
+        self.backup_path = self.base_path / "originals"
+        self.backup_path.mkdir(exist_ok=True)
+        self.valid_exts = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp', '.pdf'}
+
+    def get_info(self, filename):
+        name, ext = os.path.splitext(filename)
+        match = re.search(r'^(.*)_e(\d+)$', name)
+        if match:
+            return match.group(1), int(match.group(2)), ext
+        return name, 0, ext
+
+    def adjust_lighting(self, img, mode):
+        # Ensure image is in 8-bit format to save memory
+        if img.dtype != np.uint8:
+            img = cv2.convertScaleAbs(img)
+            
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        
+        if mode == '1': # Fair
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            img = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+            return cv2.convertScaleAbs(img, alpha=1.1, beta=5)
+        elif mode == '2': # Light
+            l = cv2.add(l, 25)
+        elif mode == '3': # Dark
+            l = cv2.subtract(l, 25)
+            
+        return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+
+    def undo(self):
+        files = [f for f in self.base_path.iterdir() if f.suffix.lower() in self.valid_exts]
+        undone_count = 0
+        for file_path in files:
+            base, version, ext = self.get_info(file_path.name)
+            if version == 0: continue 
+            
+            prev_v = version - 1
+            search = f"{base}_e{prev_v}{ext}" if prev_v > 0 else f"{base}{ext}"
+            backup_source = self.backup_path / search
+
+            if backup_source.exists():
+                file_path.unlink()
+                shutil.copy(str(backup_source), str(self.base_path / search))
+                undone_count += 1
+        print(f"⏪ Reverted {undone_count} files.")
+        gc.collect() # Clean RAM
+
+    def run(self, mode):
+        # Get list first to avoid processing files created during this run
+        files = [f for f in self.base_path.iterdir() if f.suffix.lower() in self.valid_exts]
+        processed = 0
+
+        for file_path in files:
+            if file_path.name == Path(__file__).name: continue
+            
+            try:
+                # 1. Backup current state
+                shutil.copy(str(file_path), str(self.backup_path / file_path.name))
+                
+                base, version, ext = self.get_info(file_path.name)
+                new_name = f"{base}_e{version + 1}{ext}"
+                
+                # 2. Process
+                if ext == '.pdf':
+                    doc = fitz.open(file_path)
+                    for i, page in enumerate(doc):
+                        pix = page.get_pixmap(dpi=200) # Lowered DPI slightly to save RAM
+                        img_data = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+                        cv_img = cv2.cvtColor(img_data, cv2.COLOR_RGB2BGR) if pix.n == 3 else img_data
+                        res = self.adjust_lighting(cv_img, mode)
+                        cv2.imwrite(str(self.base_path / f"{base}_e{version+1}_pg{i+1}.jpg"), res)
+                    doc.close()
+                else:
+                    # Open and immediately close PIL handle to save memory
+                    with Image.open(file_path) as pil_img:
+                        cv_img = cv2.cvtColor(np.array(pil_img.convert('RGB')), cv2.COLOR_RGB2BGR)
+                    
+                    enhanced = self.adjust_lighting(cv_img, mode)
+                    cv2.imwrite(str(self.base_path / new_name), enhanced)
+                
+                # 3. Clean up
+                file_path.unlink()
+                print(f"✅ Created: {new_name}")
+                processed += 1
+                
+                # Clear memory for this specific image
+                del cv_img
+                gc.collect() 
+
+            except Exception as e:
+                print(f"❌ Error on {file_path.name}: {e}")
+
+if __name__ == "__main__":
+    proc = StudioProProcessor()
+    while True:
+        print("\n--- STUDIO PRO (MEMORY SAFE) ---")
+        print("1. Fair | 2. Light | 3. Dark | 4. UNDO | 5. EXIT")
+        c = input("Choice: ")
+        if c in ['1', '2', '3']: proc.run(c)
+        elif c == '4': proc.undo()
+        elif c == '5': break
+
+
+==============================
+SOURCE FILE: merge pdfs.py
+==============================
+
+import os
+import shutil
+from pypdf import PdfWriter, PdfReader
+
+# Setup paths relative to where the script is located
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+OUTPUT_NAME = "Final_Merged_Document.pdf"
+
+def merge_and_cleanup():
+    # 1. Create temp folder if it doesn't exist
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    
+    writer = PdfWriter()
+    
+    # 2. Get and sort all PDF files (excluding the output and script itself)
+    pdf_files = [f for f in sorted(os.listdir(BASE_DIR)) 
+                 if f.lower().endswith('.pdf') and f != OUTPUT_NAME]
+    
+    if not pdf_files:
+        print("No PDF files found to merge.")
+        return
+
+    print(f"Starting merge of {len(pdf_files)} files...")
+
+    for filename in pdf_files:
+        filepath = os.path.join(BASE_DIR, filename)
+        reader = PdfReader(filepath)
+        num_pages = len(reader.pages)
+        
+        # Add the PDF to our final document
+        writer.append(reader)
+        
+        # 3. Add blank page if page count is odd
+        if num_pages % 2 != 0:
+            print(f"  + Added blank page to '{filename}' (was {num_pages} pgs)")
+            writer.add_blank_page()
+        else:
+            print(f"  - Added '{filename}' ({num_pages} pgs)")
+
+    # 4. Save the final merged PDF
+    output_path = os.path.join(BASE_DIR, OUTPUT_NAME)
+    with open(output_path, "wb") as output_file:
+        writer.write(output_file)
+    writer.close()
+
+    # 5. Move original files to temp folder
+    for filename in pdf_files:
+        src = os.path.join(BASE_DIR, filename)
+        dst = os.path.join(TEMP_DIR, filename)
+        
+        # Handle filename conflicts in temp (if you run this multiple times)
+        if os.path.exists(dst):
+            os.remove(dst) 
+            
+        shutil.move(src, dst)
+
+    print(f"\nDone! Merged PDF: {OUTPUT_NAME}")
+    print(f"Originals moved to: {TEMP_DIR}")
+
+if __name__ == "__main__":
+    merge_and_cleanup()
+
+
+==============================
+SOURCE FILE: PANCARD.py
+==============================
+
+import os
+import cv2
+import numpy as np
+from pdf2image import convert_from_path
+import shutil
+import re
+import sys
+import time
+import threading
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+POPPLER_PATH = r"C:\Users\rao\Documents\work\poppler-25.12.0\Library\bin"
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+class Loader:
+    def __init__(self, desc="Processing..."):
+        self.desc = desc
+        self.done = False
+
+    def animate(self):
+        for c in ['|', '/', '-', '\\']:
+            if self.done: break
+            sys.stdout.write(f'\r{self.desc} {c} ')
+            sys.stdout.flush()
+            time.sleep(0.1)
+
+    def start(self):
+        self.thread = threading.Thread(target=self.animate)
+        self.thread.start()
+
+    def stop(self):
+        self.done = True
+        self.thread.join()
+        sys.stdout.write('\r' + ' ' * (len(self.desc) + 10) + '\r')
+
+def get_next_index(directory):
+    existing_files = os.listdir(directory)
+    max_num = 0
+    for f in existing_files:
+        match = re.match(r'^(\d+)', f)
+        if match:
+            num = int(match.group(1))
+            if num > max_num: max_num = num
+    return max_num + 1
+
+def process_pan_files():
+    script_name = os.path.basename(__file__)
+    files = [f for f in os.listdir(BASE_DIR) if f.lower().endswith('.pdf') and f != script_name]
+    
+    if not files:
+        return
+
+    card_index = get_next_index(OUTPUT_DIR)
+    
+    for filename in files:
+        input_path = os.path.join(BASE_DIR, filename)
+        file_stem, _ = os.path.splitext(filename)
+        
+        pages = None
+        current_pw = None
+        
+        if file_stem.isdigit():
+            current_pw = file_stem
+            try:
+                pages = convert_from_path(input_path, dpi=700, poppler_path=POPPLER_PATH, userpw=current_pw)
+            except:
+                pages = None
+
+        if pages is None:
+            current_pw = input(f"\n    Password for PAN - {filename}: ")
+        
+        loader = Loader(f"[*] Processing {filename}")
+        loader.start()
+        
+        try:
+            if not pages:
+                pages = convert_from_path(input_path, dpi=700, poppler_path=POPPLER_PATH, userpw=current_pw)
+            
+            full_page = np.array(pages[0])
+            full_page = cv2.cvtColor(full_page, cv2.COLOR_RGB2BGR)
+
+            front_card = full_page[6084:7682, 331:2832]
+            back_card = full_page[6108:7686, 2957:5446]
+
+            cv2.imwrite(os.path.join(OUTPUT_DIR, f"{card_index}f.jpg"), front_card, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            cv2.imwrite(os.path.join(OUTPUT_DIR, f"{card_index}b.jpg"), back_card, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            
+            loader.stop()
+            shutil.move(input_path, os.path.join(TEMP_DIR, filename))
+            card_index += 1
+
+        except Exception as e:
+            loader.stop()
+            print(f"[x] Error processing {filename}: {e}")
+
+if __name__ == "__main__":
+    process_pan_files()
+
+
+==============================
+SOURCE FILE: pp.py
+==============================
+
+import os
+import shutil
+from pathlib import Path
+from PIL import Image, ImageOps
+
+def create_rotated_passport_sheet_with_border():
+    CURRENT_DIR = Path.cwd()
+    TEMP_DIR = CURRENT_DIR / "temp"
+    TEMP_DIR.mkdir(exist_ok=True)
+
+    # 700 DPI Settings
+    DPI = 700
+    SHEET_W, SHEET_H = int(4 * DPI), int(6 * DPI) # 2800x4200
+    
+    # 45mm wide x 35mm high
+    PHOTO_W, PHOTO_H = int(45 * DPI / 25.4), int(35 * DPI / 25.4)
+    BORDER_PX = 3  # 3-pixel black stroke
+    
+    # Grid: 2 columns, 4 rows
+    COLS, ROWS = 2, 4
+    
+    # Calculate spacing (including the border thickness in the photo size)
+    TOTAL_PHOTO_W = PHOTO_W + (BORDER_PX * 2)
+    TOTAL_PHOTO_H = PHOTO_H + (BORDER_PX * 2)
+    
+    GAP_X = (SHEET_W - (COLS * TOTAL_PHOTO_W)) // (COLS + 1)
+    GAP_Y = (SHEET_H - (ROWS * TOTAL_PHOTO_H)) // (ROWS + 1)
+
+    valid_extensions = ('.jpg', '.jpeg', '.png', '.bmp')
+    image_files = [f for f in CURRENT_DIR.iterdir() if f.suffix.lower() in valid_extensions]
+
+    if not image_files:
+        print("No images found in the directory.")
+        return
+
+    for img_path in image_files:
+        try:
+            print(f"Processing: {img_path.name}")
+            
+            with Image.open(img_path) as img:
+                img_rgb = img.convert("RGB")
+                
+                # Resize to portrait first (35x45mm)
+                temp_w, temp_h = int(35 * DPI / 25.4), int(45 * DPI / 25.4)
+                resized = img_rgb.resize((temp_w, temp_h), Image.Resampling.LANCZOS)
+                
+                # Rotate 90 degrees to make it landscape (45x35mm)
+                passport_photo = resized.transpose(Image.ROTATE_90)
+                
+                # --- ADD BLACK STROKE ---
+                passport_photo = ImageOps.expand(passport_photo, border=BORDER_PX, fill='black')
+            
+            # Create blank 4x6 canvas
+            canvas = Image.new('RGB', (SHEET_W, SHEET_H), 'white')
+            
+            # Paste the 8 bordered pieces
+            for row in range(ROWS):
+                for col in range(COLS):
+                    x = GAP_X + col * (TOTAL_PHOTO_W + GAP_X)
+                    y = GAP_Y + row * (TOTAL_PHOTO_H + GAP_Y)
+                    canvas.paste(passport_photo, (x, y))
+            
+            # Save and clean up
+            output_name = f"Sheet_{img_path.name}"
+            canvas.save(output_name, "JPEG", quality=98, dpi=(DPI, DPI))
+            
+            shutil.move(str(img_path), str(TEMP_DIR / img_path.name))
+            os.rename(output_name, img_path.name)
+            
+            print(f"Successfully created sheet for {img_path.name}")
+
+        except Exception as e:
+            print(f"Error processing {img_path.name}: {e}")
+
+    print("\nAll files processed! Originals moved to 'temp'.")
+    input("Press Enter to exit...")
+
+if __name__ == "__main__":
+    create_rotated_passport_sheet_with_border()
+
+
+==============================
+SOURCE FILE: py_batToTEXT.py
+==============================
+
+import os
+
+def merge_scripts_to_txt(output_name="combined_files.txt"):
+    # Target extensions
+    extensions = ('.py', '.bat')
+    
+    # Get all matching files in the current directory
+    files = [f for f in os.listdir('.') if f.endswith(extensions)]
+    
+    if not files:
+        print("No .py or .bat files found in the current directory.")
+        return
+
+    with open(output_name, 'w', encoding='utf-8') as outfile:
+        for filename in files:
+            # Avoid merging the output file into itself
+            if filename == output_name:
+                continue
+            
+            # Write a header with the filename
+            outfile.write(f"{'='*30}\n")
+            outfile.write(f"SOURCE FILE: {filename}\n")
+            outfile.write(f"{'='*30}\n\n")
+            
+            try:
+                with open(filename, 'r', encoding='utf-8', errors='ignore') as infile:
+                    outfile.write(infile.read())
+            except Exception as e:
+                outfile.write(f"[Error reading file: {e}]\n")
+            
+            # Add spacing between file contents
+            outfile.write("\n\n")
+
+    print(f"Success! {len(files)} files merged into '{output_name}'.")
+
+if __name__ == "__main__":
+    merge_scripts_to_txt()
+
+
+==============================
+SOURCE FILE: RC.py
+==============================
+
+import os
+import cv2
+import numpy as np
+from pdf2image import convert_from_path
+import shutil
+import re
+from pathlib import Path
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+POPPLER_PATH = r"C:\Users\rao\Documents\work\poppler-25.12.0\Library\bin"
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+
+CROP_W = 2464
+CROP_H = 1543
+X_START = 0 
+Y_START = 0 
+
+ALPHA = 1.2  
+BETA = -40   
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+def apply_levels(image):
+    return cv2.convertScaleAbs(image, alpha=ALPHA, beta=BETA)
+
+def get_next_index(directory):
+    existing_files = os.listdir(directory)
+    max_num = 0
+    for f in existing_files:
+        match = re.match(r'^(\d+)', f)
+        if match:
+            num = int(match.group(1))
+            if num > max_num: max_num = num
+    return max_num + 1
+
+def move_to_temp_safely(source_path, temp_dir):
+    original_filename = Path(source_path).name
+    destination_path = Path(temp_dir) / original_filename
+    counter = 1
+    while destination_path.exists():
+        new_filename = f"{Path(source_path).stem}_{counter}{Path(source_path).suffix}"
+        destination_path = Path(temp_dir) / new_filename
+        counter += 1
+    shutil.move(source_path, str(destination_path))
+
+def process_rc_pdfs():
+    script_name = os.path.basename(__file__)
+    files = [f for f in os.listdir(BASE_DIR) if os.path.isfile(os.path.join(BASE_DIR, f)) 
+             and f.lower().endswith('.pdf') and f != script_name]
+    
+    if not files:
+        return
+
+    card_index = get_next_index(OUTPUT_DIR)
+
+    for filename in files:
+        input_path = os.path.join(BASE_DIR, filename)
+        try:
+            pages = convert_from_path(input_path, dpi=700, poppler_path=POPPLER_PATH)
+            
+            if len(pages) >= 1:
+                front_img = cv2.cvtColor(np.array(pages[0]), cv2.COLOR_RGB2BGR)
+                front_crop = front_img[Y_START : Y_START + CROP_H, X_START : X_START + CROP_W]
+                cv2.imwrite(os.path.join(OUTPUT_DIR, f"{card_index}f.jpg"), apply_levels(front_crop), [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                del front_img
+            
+            if len(pages) >= 2:
+                back_img = cv2.cvtColor(np.array(pages[1]), cv2.COLOR_RGB2BGR)
+                back_crop = back_img[Y_START : Y_START + CROP_H, X_START : X_START + CROP_W]
+                cv2.imwrite(os.path.join(OUTPUT_DIR, f"{card_index}b.jpg"), apply_levels(back_crop), [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                del back_img
+
+            pages.clear()
+            move_to_temp_safely(input_path, TEMP_DIR)
+            card_index += 1
+
+        except Exception as e:
+            print(f"Error: {e}")
+
+if __name__ == "__main__":
+    process_rc_pdfs()
+
+
+==============================
+SOURCE FILE: run_script (2).bat
+==============================
+
+@echo off
+python "pp.py"
+
+
+
+==============================
+SOURCE FILE: run_script (3).bat
+==============================
+
+@echo off
+python "a4.py"
+
+
+
+==============================
+SOURCE FILE: run_script.bat
+==============================
+
+@echo off
+python "a4.py"
+
+
+
+==============================
+SOURCE FILE: toJPG.py
+==============================
+
+import os
+import shutil
+from PIL import Image
+from pdf2image import convert_from_path
+from docx2pdf import convert as docx_to_pdf
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+TEMP = os.path.join(BASE, 'temp')
+POPPLER = r'C:\Users\rao\Documents\work\poppler-25.12.0\Library\bin'
+
+os.makedirs(TEMP, exist_ok=True)
+
+def process_files():
+    for file in os.listdir(BASE):
+        src = os.path.join(BASE, file)
+        if os.path.isdir(src) or file.lower().endswith('.py') or file == 'temp':
+            continue
+
+        name, ext = os.path.splitext(file)
+        ext = ext.lower()
+        
+        try:
+            if ext in ['.doc', '.docx']:
+                temp_pdf = os.path.join(TEMP, f"{name}_temp.pdf")
+                docx_to_pdf(src, temp_pdf)
+                pages = convert_from_path(temp_pdf, dpi=300, poppler_path=POPPLER)
+                for i, p in enumerate(pages, 1):
+                    p.save(os.path.join(BASE, f"{name}_{i}.jpg"), "JPEG", quality=95)
+                shutil.move(src, os.path.join(TEMP, file))
+                if os.path.exists(temp_pdf):
+                    os.remove(temp_pdf)
+
+            elif ext == '.pdf':
+                try:
+                    pages = convert_from_path(src, dpi=300, poppler_path=POPPLER)
+                except:
+                    pwd = input(f"Password for {file}: ")
+                    pages = convert_from_path(src, dpi=300, poppler_path=POPPLER, userpw=pwd)
+                for i, p in enumerate(pages, 1):
+                    p.save(os.path.join(BASE, f"{name}_{i}.jpg"), "JPEG", quality=95)
+                shutil.move(src, os.path.join(TEMP, file))
+
+            elif ext in ['.png', '.webp', '.jpeg', '.jpg', '.heif']:
+                with Image.open(src) as img:
+                    if img.mode in ("RGBA", "P"):
+                        bg = Image.new("RGB", img.size, (255, 255, 255))
+                        bg.paste(img, mask=img.convert("RGBA").split()[3])
+                        img = bg
+                    else:
+                        img = img.convert('RGB')
+                    img.save(os.path.join(BASE, f"{name}.jpg"), "JPEG", quality=95)
+                if ext != '.jpg':
+                    shutil.move(src, os.path.join(TEMP, file))
+        except Exception as e:
+            print(f"Error {file}: {e}")
+
+if __name__ == "__main__":
+    process_files()
+
+
+==============================
+SOURCE FILE: toPDF.py
+==============================
+
+import os
+import zipfile
+import gc
+from PIL import Image
+from docx2pdf import convert
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+TEMP = os.path.join(BASE, "temp")
+ZIP_NAME = "files_backup.zip"
+os.makedirs(TEMP, exist_ok=True)
+
+def process():
+    jpg_files = []
+    word_files = []
+    images = []
+
+    for file in sorted(os.listdir(BASE)):
+        path = os.path.join(BASE, file)
+        if os.path.isdir(path) or file.lower().endswith('.py') or file == 'temp':
+            continue
+            
+        ext = file.lower()
+        if ext.endswith((".jpg", ".jpeg")):
+            jpg_files.append(file)
+            img = Image.open(path).convert("RGB")
+            images.append(img)
+        elif ext.endswith(".docx"):
+            word_files.append(file)
+
+    if not jpg_files and not word_files:
+        print("No files found.")
+        return
+
+    print("1. All images into ONE PDF")
+    print("2. Each image into SEPARATE PDFs")
+    mode = input("Choice (1-2): ")
+
+    if images:
+        if mode == '1':
+            output_path = os.path.join(BASE, "merged_images.pdf")
+            images[0].save(output_path, save_all=True, append_images=images[1:])
+            print(f"Saved merged PDF.")
+        else:
+            for i, img in enumerate(images):
+                img.save(os.path.join(BASE, f"{os.path.splitext(jpg_files[i])[0]}.pdf"))
+            print(f"Saved {len(images)} separate PDFs.")
+        
+        for img in images:
+            img.close()
+        del images
+        gc.collect()
+
+    for doc in word_files:
+        try:
+            convert(os.path.join(BASE, doc), os.path.join(BASE, doc.replace(".docx", ".pdf")))
+        except Exception as e:
+            print(f"Error doc {doc}: {e}")
+
+    zip_path = os.path.join(TEMP, ZIP_NAME)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for f in jpg_files + word_files:
+            zipf.write(os.path.join(BASE, f), f)
+
+    for f in jpg_files + word_files:
+        try:
+            os.remove(os.path.join(BASE, f))
+        except:
+            pass
+
+    print(f"Done. Backed up to {ZIP_NAME}")
+
+if __name__ == "__main__":
+    process()
+
+
+==============================
+SOURCE FILE: toWORD.py
+==============================
+
+import os
+import shutil
+import gc
+from docx import Document
+from docx.shared import Inches, Mm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from pdf2docx import Converter
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_DIR = os.path.join(BASE_DIR, 'temp')
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+def process():
+    for file in os.listdir(BASE_DIR):
+        file_path = os.path.join(BASE_DIR, file)
+        if os.path.isdir(file_path) or file.lower().endswith('.py') or file == 'temp':
+            continue
+            
+        ext = file.lower()
+        name_no_ext = os.path.splitext(file)[0]
+        output_file = os.path.join(BASE_DIR, f"{name_no_ext}.docx")
+
+        try:
+            success = False
+            if ext.endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
+                doc = Document()
+                section = doc.sections[0]
+                section.page_height = Mm(297)
+                section.page_width = Mm(210)
+                
+                para = doc.add_paragraph()
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = para.add_run()
+                
+                run.add_picture(file_path, width=Inches(6.0))
+                
+                doc.save(output_file)
+                success = True
+                del doc
+                
+            elif ext.endswith(".pdf"):
+                cv = Converter(file_path)
+                cv.convert(output_file)
+                cv.close()
+                success = True
+                del cv
+
+            if success:
+                shutil.move(file_path, os.path.join(TEMP_DIR, file))
+                print(f"Processed: {file}")
+            
+            gc.collect()
+        except Exception as e:
+            print(f"Error {file}: {e}")
+
+if __name__ == "__main__":
+    process()
+
+
+==============================
+SOURCE FILE: voter.py
+==============================
+
+import os
+import cv2
+import numpy as np
+from pdf2image import convert_from_path
+import shutil
+import re
+from pathlib import Path
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+POPPLER_PATH = r"C:\Users\rao\Documents\work\poppler-25.12.0\Library\bin"
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+def get_next_index(directory):
+    existing_files = os.listdir(directory)
+    max_num = 0
+    for f in existing_files:
+        match = re.match(r'^(\d+)', f)
+        if match:
+            num = int(match.group(1))
+            if num > max_num:
+                max_num = num
+    return max_num + 1
+
+def move_to_temp_safely(source_path, temp_dir):
+    original_filename = Path(source_path).name
+    destination_path = Path(temp_dir) / original_filename
+    counter = 1
+    while destination_path.exists():
+        new_filename = f"{Path(source_path).stem}_{counter}{Path(source_path).suffix}"
+        destination_path = Path(temp_dir) / new_filename
+        counter += 1
+    shutil.move(source_path, str(destination_path))
+
+def process_voter_cards():
+    script_name = os.path.basename(__file__)
+    files = [f for f in os.listdir(BASE_DIR) 
+             if os.path.isfile(os.path.join(BASE_DIR, f)) 
+             and f.lower().endswith(('.pdf', '.jpg', '.jpeg', '.png'))
+             and f != script_name]
+
+    if not files:
+        return
+
+    card_index = get_next_index(OUTPUT_DIR)
+
+    for filename in files:
+        input_path = os.path.join(BASE_DIR, filename)
+        ext = Path(filename).suffix.lower()
+        
+        try:
+            full_page = None
+            if ext == '.pdf':
+                pages = convert_from_path(input_path, dpi=700, poppler_path=POPPLER_PATH)
+                full_page = cv2.cvtColor(np.array(pages[0]), cv2.COLOR_RGB2BGR) 
+            elif ext in ['.jpg', '.jpeg', '.png']:
+                full_page = cv2.imread(input_path)
+
+            if full_page is None or full_page.size == 0:
+                continue
+
+            front_card = full_page[925:2415, 320:2690] 
+            back_card = full_page[925:2420, 3178:5555]
+
+            front_name = f"{card_index}f.jpg"
+            back_name = f"{card_index}b.jpg"
+            
+            cv2.imwrite(os.path.join(OUTPUT_DIR, front_name), front_card, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            cv2.imwrite(os.path.join(OUTPUT_DIR, back_name), back_card, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            
+            move_to_temp_safely(input_path, TEMP_DIR)
+            card_index += 1
+
+        except Exception as e:
+            print(f"Error: {e}")
+
+if __name__ == "__main__":
+    process_voter_cards()
+
+
