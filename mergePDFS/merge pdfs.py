@@ -4,7 +4,7 @@ from pypdf import PdfWriter, PdfReader
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
-OUTPUT_NAME = "Final_Merged_Document.pdf"
+OUTPUT_NAME = "_Merged.pdf"
 
 def merge_and_cleanup():
     os.makedirs(TEMP_DIR, exist_ok=True)
