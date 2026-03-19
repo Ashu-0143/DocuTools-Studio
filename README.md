@@ -1,37 +1,37 @@
 # 📄 DocuTools-Studio
 
-🚀 A powerful collection of Python tools for automating document processing in real-world workflows (ID cards, PDFs, images).
+A clean collection of Python tools to handle **documents, ID cards, PDFs, and images** in a fast, practical way.
 
 ---
 
-## ✨ Features
+## ✨ What you can do
 
 ### 🪪 ID Card Processing
 
-* Aadhar Card
-* PAN Card
+* Aadhar
+* PAN
 * Voter ID
 * RC (Registration Certificate)
 * Senior Citizenship
 
 ✔ Extract front & back automatically
-✔ Handles password-protected PDFs
-✔ Auto file indexing
+✔ Works with password-protected PDFs
+✔ Clean output with proper naming
 
 ---
 
 ### 🖼️ Image Tools
 
 * ✂️ Auto crop white borders
-* 🎨 Image enhancement (Fair / Light / Dark)
-* 🧾 Passport photo sheet generator (4x6)
+* 🎨 Enhance images (light / dark / balanced)
+* 🧾 Passport photo sheet generator
 
 ---
 
-### 📄 PDF Tools
+### 📄 PDF & Conversion Tools
 
-* 📚 Merge PDFs (auto blank page support)
-* 🔄 Convert:
+* 📚 Merge PDFs (with blank page support)
+* 🔄 Convert files:
 
   * PDF → JPG
   * JPG → PDF
@@ -41,23 +41,28 @@
 
 ## 📁 Project Structure
 
-```bash
+```
 AADHAR/
 PAN/
 VOTER/
 RC/
 SENIOR CITIZENSHIP/
-AUTOCROP THE WHITE BORDER/
+cropBorder/
 Enhance/
-Merge PDF with blanks/
+mergePDFS/
 Passphoto Maker/
+_toJPG/
+_toPDF/
+_toWORD/
 ```
 
 ---
 
 ## ⚙️ Setup
 
-```bash
+Install all dependencies:
+
+```
 pip install opencv-python numpy pillow pdf2image pypdf docx2pdf python-docx pdf2docx pymupdf pillow-heif
 ```
 
@@ -65,15 +70,15 @@ pip install opencv-python numpy pillow pdf2image pypdf docx2pdf python-docx pdf2
 
 ## ▶️ Usage
 
-Run any script:
+Run any tool directly:
 
-```bash
+```
 python script_name.py
 ```
 
 Example:
 
-```bash
+```
 cd AADHAR
 python Aadhar.py
 ```
@@ -82,23 +87,34 @@ python Aadhar.py
 
 ## ⚠️ Important Notes
 
-* Update `POPPLER_PATH` inside scripts
-* Designed for Windows
-* Input files → same folder
-* Output → `output/`
-* Originals → `temp/`
+* Update **POPPLER path** inside scripts (for PDF tools)
+* Designed mainly for **Windows**
+* Input files → same folder as script
+* Output → `output/` folder (or same directory)
+* Originals → moved to `temp/`
 
 ---
 
-## 🔥 Highlights
+## 🔥 Why this project
 
-* Real-world studio automation
-* Batch processing support
-* Handles multiple file formats
-* Clean folder-based workflow
+* Built for **real-world usage** (shops, document work, etc.)
+* Handles bulk files easily
+* Supports multiple formats
+* Simple folder-based workflow (no complex setup)
+
+---
+
+## 📬 Support / Suggestions
+
+Found an issue? Have an idea to improve this?
+
+📧 **Email:** [ashok8755.p@gmail.com](mailto:ashok8755.p@gmail.com)
+💬 Or open an issue on GitHub
 
 ---
 
 ## 👤 Author
 
 GitHub: https://github.com/Ashu-0143
+
+---
