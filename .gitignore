@@ -1,2 +1,6 @@
-/Hiddens
-/RESUME
+temp/*
+output/*
+*/temp/*
+*/output/*
+__pycache__/
+*.pyc
