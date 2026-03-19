@@ -30,7 +30,7 @@ RC/
 ---
 
 ## 🖼️ Sample Output
-![Sample](../assets/sample1.jpg)
+![Sample](../assets/rc1.jpg)
 
 ---
 
