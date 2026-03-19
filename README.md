@@ -1,29 +1,37 @@
 # 📄 DocuTools-Studio
 
-A collection of Python scripts for automating document processing tasks used in real-world workflows.
+🚀 A powerful collection of Python tools for automating document processing in real-world workflows (ID cards, PDFs, images).
 
 ---
 
-## 📁 Features
+## ✨ Features
 
-### 🪪 ID Processing
+### 🪪 ID Card Processing
 
-* Aadhar
+* Aadhar Card
 * PAN Card
 * Voter ID
-* RC
+* RC (Registration Certificate)
 * Senior Citizenship
+
+✔ Extract front & back automatically
+✔ Handles password-protected PDFs
+✔ Auto file indexing
+
+---
 
 ### 🖼️ Image Tools
 
-* Auto crop white borders
-* Image enhancement (fair/light/dark)
-* Passport photo sheet generator
+* ✂️ Auto crop white borders
+* 🎨 Image enhancement (Fair / Light / Dark)
+* 🧾 Passport photo sheet generator (4x6)
+
+---
 
 ### 📄 PDF Tools
 
-* Merge PDFs (with blank pages)
-* Convert:
+* 📚 Merge PDFs (auto blank page support)
+* 🔄 Convert:
 
   * PDF → JPG
   * JPG → PDF
@@ -31,7 +39,23 @@ A collection of Python scripts for automating document processing tasks used in 
 
 ---
 
-## ⚙️ Requirements
+## 📁 Project Structure
+
+```bash
+AADHAR/
+PAN/
+VOTER/
+RC/
+SENIOR CITIZENSHIP/
+AUTOCROP THE WHITE BORDER/
+Enhance/
+Merge PDF with blanks/
+Passphoto Maker/
+```
+
+---
+
+## ⚙️ Setup
 
 ```bash
 pip install opencv-python numpy pillow pdf2image pypdf docx2pdf python-docx pdf2docx pymupdf pillow-heif
@@ -41,24 +65,40 @@ pip install opencv-python numpy pillow pdf2image pypdf docx2pdf python-docx pdf2
 
 ## ▶️ Usage
 
-Go to any folder and run:
+Run any script:
 
 ```bash
 python script_name.py
 ```
 
+Example:
+
+```bash
+cd AADHAR
+python Aadhar.py
+```
+
 ---
 
-## 📌 Notes
+## ⚠️ Important Notes
 
+* Update `POPPLER_PATH` inside scripts
 * Designed for Windows
-* Update `POPPLER_PATH` before running
 * Input files → same folder
 * Output → `output/`
 * Originals → `temp/`
 
 ---
 
+## 🔥 Highlights
+
+* Real-world studio automation
+* Batch processing support
+* Handles multiple file formats
+* Clean folder-based workflow
+
+---
+
 ## 👤 Author
 
-https://github.com/Ashu-0143
+GitHub: https://github.com/Ashu-0143
